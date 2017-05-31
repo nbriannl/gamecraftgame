@@ -1,0 +1,613 @@
+<html>
+<head></head>
+
+<style>
+canvas {
+    border:1px solid #d3d3d3;
+    background-color: #f1f1f1;
+}
+
+.divider {
+    width:332px;
+    height:auto;
+    display:inline-block;
+}
+.centre-divider{
+    width:322px;
+    height:auto;
+    display:inline-block;
+}
+</style>
+
+<body onload="startGame()">
+
+<script>
+
+var score;
+var spaceship;
+var planets = [];
+var action;
+var gameover;
+var gamestatus = "start";
+
+var canvas_width = 1000;
+var canvas_height = 800;
+
+var bgm = new Audio("bgm.mp3");
+var thrust = new Audio("thrust.wav");
+var crash = new Audio("crash.mp3");
+bgm.loop = true;
+bgm.play();
+
+
+/* Constructors */
+
+// CONSTRUCTORS are objects in the project with certain sets of defined properties.
+// By calling the object with inputted parameters, you thus create the object
+// Other properties of the object can be further derived by the inputted arguments.
+
+// For a Planet in the game. (As you can see, you give them the x-y coordinates, the radius and the mass)
+function Planet(x, y, radius, mass) {
+    this.x = x;
+    this.y = y;
+    this.radius = radius;
+    this.mass = mass;
+    this.rotation = Math.random * (Math.PI / 2); //variable not used
+}
+
+// For a saceship in the game
+// Note that the x-y coordinates and degree bearings are given.
+function Spaceship(x, y, bearing) {
+    this.x = x;
+    this.y = y;
+    this.bearing = bearing;
+    this.velocity = 0;
+    this.radius = 25;
+    this.mass = 10;
+}
+
+// ResolvedVector is a vector object defined by it's x and y direction respectively
+function ResolvedVector(x, y) {
+    this.x_dir = x;
+    this.y_dir = y;
+}
+
+/* End Constructors */
+
+// This is a function. This is not an object Constructor
+// This function resolves a given vector quantity, eg: velocity or force
+// of magnitude and direct and gives their respective x and y direction
+function resolve_vector(magnitude, direction) {
+    var x = magnitude * Math.sin(direction);
+    var y = magnitude * Math.cos(direction);
+    
+    return new ResolvedVector(x, y);
+}
+
+/* PHYSICS */ /* SPACESHIP METHODS */
+
+// This method of a spaceship is a function that takes in thruster state of the spaceship 
+// And outputs a new ResolvedVector for the spaceship.
+Spaceship.prototype.get_thrust = function(thrusters) {
+    var THRUSTVALUE = 20;
+    var direction = this.bearing;
+    var x_dir = 0;
+    var y_dir = 0;
+
+    //left thruster
+    if (thrusters === 1) {
+        x_dir += resolve_vector(THRUSTVALUE, direction + (Math.PI)/2).x_dir;
+        y_dir += resolve_vector(THRUSTVALUE, direction + (Math.PI)/2).y_dir;
+    }
+    // right thruster
+    if (thrusters === 2) {
+        x_dir += resolve_vector(THRUSTVALUE, direction - (Math.PI)/2).x_dir;
+        y_dir += resolve_vector(THRUSTVALUE, direction - (Math.PI)/2).y_dir;
+    }
+    
+    return new ResolvedVector(x_dir, y_dir); // somehow or another you create new object, use 'new'
+}
+
+// This method of a spaceship is a function that takes in force and 
+Spaceship.prototype.update_state = function(force) {
+    // Resolve the velocity of the spaceship at this given instance
+    var vel = resolve_vector(this.velocity, this.bearing);
+
+    // Get respective acceleration in x and y directions
+    var x_acc = force.x_dir / this.mass;
+    var y_acc = force.y_dir / this.mass;
+
+    // Update the values of the x and y velocities  
+    // Which is the sum of the resolved velocity in the x and y directions with
+    // Their respective acceration values in the x and y directions
+    var x_vel = vel.x_dir + x_acc;
+    var y_vel = vel.y_dir + y_acc;
+
+    // Then update the object location
+    this.x += x_vel;
+    this.y += y_vel;
+
+    // And bearing based on the maginitude of the x and y velocities.
+    // Remember Physics? I give you two vectors, find me the resultant vectors and the direction?
+    // Yeah that.
+    this.bearing = get_vector_dir(x_vel, y_vel); // refer below to see function operation
+    this.velocity = get_vector_mag(x_vel, y_vel); // refer below to see function operation
+    if (this.velocity > 15 + score/250){
+        this. velocity = 15 + score/250;
+    }
+}
+
+// Get vector direction. Is fucking trigo. Fuck trigo.
+function get_vector_dir(x_vector, y_vector) {
+    if (x_vector === 0) {
+        return (y_vector > 0) ? 0 : Math.PI;
+    } else if (y_vector === 0) {
+        return (x_vector > 0) ? Math.PI / 2 : Math.PI * (3 / 2);
+    } else {
+        var theta = Math.atan(Math.abs(x_vector) / Math.abs(y_vector));
+        if (x_vector > 0 && y_vector > 0) {
+            return theta;
+        } else if (x_vector > 0 && y_vector < 0) {
+            return Math.PI - theta;
+        } else if (x_vector < 0 && y_vector < 0) {
+            return Math.PI + theta;
+        } else {
+            return (2 * Math.PI) - theta;
+        }
+    }
+}
+
+// Magnitude of a vector given it's x and y coordinates is just Pythagoras Theorem.
+function get_vector_mag(x_vector, y_vector) {
+    return Math.sqrt(Math.pow(x_vector, 2) + Math.pow(y_vector, 2));
+}
+
+
+/* PHYSICS */ /* PLANET METHODS */
+
+// Collision function! BAM! (Credits to Tzerbin and co. or whoever spoke so we could think less) 
+// Basically, when the planet and a given body (could be the spaceship or another planet)
+// have a distance which is lesser than their sum of their radius, they are in collision.  
+Planet.prototype.collide = function(obj_x, obj_y, obj_radius) { 
+    
+    // The things about JS is that 'this'' almost always gets the variable 
+    // from the object in question, i.e. the Planet.
+    // Until now, I still cannot get over the fact that x and y are in fact
+    // x and y coordinates in the cartesian coordinate system.
+    x_dist = Math.pow(this.x - obj_x, 2);
+    y_dist = Math.pow(this.y - obj_y, 2);
+    
+    if (Math.sqrt(x_dist + y_dist) < this.radius + obj_radius ) {
+        return true;
+    }
+    else {
+        return false;
+    }
+}
+
+// This method gets gravitational force of a given planet and another body. Most likely the spaceship.
+Planet.prototype.get_gforce = function(obj_x, obj_y, obj_mass) {
+    var scale_factor = 0.7;
+    var netForce, bearing, x, y, distance;
+    x = obj_x - this.x;
+    y = obj_y - this.y;
+    distance = Math.sqrt(Math.pow(x, 2) + Math.pow(y, 2));
+    netForce = scale_factor * (obj_mass * this.mass) / distance;
+    bearing = resolve_bearing(obj_x, obj_y, this.x, this.y);
+    var res_force = resolve_vector(netForce, bearing); 
+
+    return {
+        netForce : netForce, //netForce variable not used
+        x_dir : res_force.x_dir,
+        y_dir : res_force.y_dir,
+        bearing : bearing, // bearing variable not used
+    };  
+}
+
+// This function answers the question
+// How do you get the bearing of an object from a position, given the different x and y coordinates of the two bodies?
+function resolve_bearing(x1, y1, x2, y2){
+    var bearing;
+    var x = x2 - x1;
+    var y = y2 - y1;
+    //first quadrant
+    if(x >= 0 && y > 0){
+        bearing = Math.atan(x/y);
+    }
+    //second quardrant
+    else if (x > 0 && y <= 0){
+        bearing = Math.atan(Math.abs(y)/x) + (Math.PI)/2;
+    }
+    //third quardrant
+    else if (x <= 0 && y < 0){
+        bearing = Math.atan(Math.abs(x)/Math.abs(y)) + (Math.PI);
+    }
+    //forth quadrant
+    else if(x < 0 && y >= 0){
+        bearing = Math.atan(y/Math.abs(x)) + (Math.PI)*(3/2);
+    }
+    
+    return bearing;
+}
+
+/* GAME ENGINE MAIN */
+
+// This function starts the game and initialises the values.
+function startGame() {
+    generateSpaceship();
+    generatePlanets( getRandomInt(1, 5) ) ;
+    score = 0;
+    action = 0;
+    gameover = false;
+    gameArea.start();
+}
+
+function getRandomInt(min, max) {
+  min = Math.ceil(min);
+  max = Math.floor(max);
+  return Math.floor(Math.random() * (max - min)) + min;
+}
+
+// Generates (or spawns) a Spaceship in the game.
+function generateSpaceship() {
+    
+    // get the coordinates for spawning first, make sure it is within canvas boundaries
+    do {
+        var x = Math.random() * canvas_width;
+        var y = Math.random() * canvas_height;
+    } while (x < 50 || x > canvas_width - 50 || y < 50 || y > canvas_height - 50);
+
+    // and let us now create (a new) spaceship object inside the canvas
+    spaceship = new Spaceship(x, y, 0);   
+}
+
+// Generates (or spawns) all Planets in the game
+function generatePlanets(num_planets) {
+    planets = [];
+    var max_x = canvas_width;
+    var max_y = canvas_height;
+    var min_rad = 50;
+    var max_add = 50;
+    var max_mass = 125;
+    ////console.log("a");
+    for (var i = 0; i < num_planets; i ++) {
+        var this_planet;
+        do {
+            var this_x = Math.random() * max_x;
+            var this_y = Math.random() * max_y;
+            var this_rad = min_rad + Math.random() * max_add;
+            var this_mass = this_rad / (min_rad + max_add) * max_mass;
+            ////console.log("a");
+            this_planet = new Planet(this_x, this_y, this_rad, this_mass);
+        } while(collidesWithExisting(this_planet));
+        
+        planets.push(this_planet);
+
+    }
+}
+
+// For a given planet, iterates through all the planets to see if it is in collision.
+function collidesWithExisting(p) {
+    if (p.x - p.radius < spaceship.radius || p.x + p.radius > canvas_width - spaceship.radius || 
+    p.y - p.radius < spaceship.radius || p.y + p.radius > canvas_height - spaceship.radius) {
+        return true;
+    }
+
+    var x_diff = Math.abs(p.x - spaceship.x);
+    var y_diff = Math.abs(p.y - spaceship.y);
+    var dist = Math.sqrt(Math.pow(x_diff, 2) + Math.pow(y_diff, 2));
+    if (p.radius + spaceship.radius + 38 > dist) { // WTF IS THIS? WHAT IS 38.
+        return true;
+    }
+
+    for (i in planets) {
+        var q = planets[i];
+        var x_diff = Math.abs(p.x - q.x);
+        var y_diff = Math.abs(p.y - q.y);
+        var dist = Math.sqrt(Math.pow(x_diff, 2) + Math.pow(y_diff, 2));
+        if (p.radius + q.radius + 76 > dist) {
+            return true;
+        }
+    }
+    return false;
+}
+
+var gameArea = {
+    canvas : document.createElement("canvas"),
+    start : function() {
+        this.canvas.width = canvas_width;
+        this.canvas.height = canvas_height;
+        this.context = this.canvas.getContext("2d");
+        document.body.insertBefore(this.canvas, document.body.childNodes[0]);
+        this.frameNo = 0;
+        document.addEventListener("keydown",keyDownHandler, false);	
+	    document.addEventListener("keyup",keyUpHandler, false);	
+        document.addEventListener("mouseup", onRelease, false);
+        this.interval = setInterval(updateGameArea, 50);
+        },
+    clear : function() {
+        this.context.clearRect(0, 0, this.canvas.width, this.canvas.height);
+    }
+}
+
+function keyDownHandler(event) {
+	var keyPressed = String.fromCharCode(event.keyCode);
+    if (keyPressed === "P") {
+        console.log("RIGHT");
+        action = 2;
+    } else if (keyPressed === "Q") {
+        console.log("LEFT");
+        action = 1;
+    } 
+}
+
+function keyUpHandler(event) {
+    var keyPressed = String.fromCharCode(event.keyCode);
+    if (keyPressed === "P") {
+        console.log("RELEASE RIGHT");
+        thrust.pause();
+        action = 0;
+    } else if (keyPressed === "Q") {
+        console.log("RELEASE LEFT");
+        thrust.pause();
+        action = 0;
+    } else if (keyPressed === " ") {
+        if (gameover) {
+            clickGameOver();
+        } else {
+            clickGameStart();
+        }
+        
+    }
+}
+
+function clickGameOver() {
+    gamestatus = "game";
+    startGame();
+}
+
+function clickGameStart() {
+    gamestatus = "gameplay";
+}
+
+function onLeftDown() {
+    action = 1;
+}
+
+function onRightDown() {
+    action = 2;
+}
+
+function onRelease() {
+    action = 0;
+    thrust.pause();
+}
+
+
+function updateGameArea() {
+    
+    if (checkGameOver()) {
+        setButtonArea('<div class="centre-divider"></div><button onmouseup="clickGameOver()"><img src="start-button.png"></button>');
+        clearInterval(gameArea.interval);
+        gamestatus = "gameover";
+        gameover = true;
+        displayGameover();
+        
+    } else if (gamestatus === "start") {
+        setButtonArea('<div class="centre-divider"></div><button onmouseup="clickGameStart()"><img src="start-button.png"></button>');
+        displayGameStart();    
+        
+    } else {
+        setButtonArea('<button onmousedown="onLeftDown()"><img src="L-button.png"></button><div class="divider"></div> <button onmousedown="onRightDown()"><img src="R-button.png"></button>');
+        displayGamePlay();
+    }    
+}
+
+function displayGameStart() {
+    gameArea.clear();
+    updateBackground();
+    var hamster = new Image();
+    hamster.src = "hamster_full.png";
+    var start_text = new Image();
+    start_text.src = "title.png";
+    ctx.drawImage(hamster, 0, 100);
+    ctx.drawImage(start_text, 20, 150);
+}
+
+function updateScore() {
+    ctx = gameArea.context;
+
+    score += 10 * checkScoring(); 
+
+    ctx.font = "32px Consolas";
+    ctx.fillStyle = "white";
+    ctx.textAlign = "right";
+    ctx.fillText("Score: " + score, canvas_width - 20, 35);
+}
+
+// 
+function checkScoring() {
+    var count = 0 ;
+    for (i in planets) {
+        var p = planets[i];
+        if (p.isWithinScoringRange(spaceship.x, spaceship.y, spaceship.radius)) {
+            count++;
+        } 
+    }
+    return count;
+}
+
+
+Planet.prototype.isWithinScoringRange = function(obj_x, obj_y, obj_radius) { 
+    
+    x_dist = Math.pow(this.x - obj_x, 2);
+    y_dist = Math.pow(this.y - obj_y, 2);
+    
+    if (Math.sqrt(x_dist + y_dist) < this.radius + 5 * obj_radius ) {
+        return true;
+    }
+    else {
+        return false;
+    }
+}
+
+function updateSpaceship() {
+    
+    ctx = gameArea.context;
+
+    var spaceship_width = 100;
+    var spaceship_height = 124;
+
+    var img = new Image();
+
+    if (!gameover) {
+        // this 2 lines of code do the main movement of the spaceship
+        // Get resultant force --> Update the spaceship accordingly
+        var res_force = get_res_force();
+        spaceship.update_state(res_force);
+        
+        if (action === 1) {
+            img.src = "left_hamster.png";
+            thrust.play();
+        } else if (action === 2) {
+            img.src = "right_hamster.png";
+            thrust.play();
+        } else {
+            img.src = "hamster.png";
+        }
+    } else {
+        img.onload = function() {
+            ctx.save();
+            ctx.translate(spaceship.x , spaceship.y);
+            ctx.rotate(-(Math.PI + spaceship.bearing));
+            ctx.drawImage(img, -spaceship_width/2, -spaceship_height/2);
+            ctx.restore();
+        }
+        img.src = "hamster-end.png";
+    }
+    
+    ctx.save();
+    ctx.translate(spaceship.x , spaceship.y);
+    ctx.rotate(-(Math.PI + spaceship.bearing));
+    ctx.drawImage(img, -spaceship_width/2, -spaceship_height/2);
+    ctx.restore();
+
+}
+
+// Get the resultatn force of the spaceship by computing the current thrust state
+// together with the gravitational force exerted by all planets.
+function get_res_force() {
+    var spaceship_force = spaceship.get_thrust(action);
+    //var spaceship_force = new ResolvedVector(0, 0);
+    ////console.log(JSON.stringify(spaceship_force));
+    var x_dir = spaceship_force.x_dir;
+    var y_dir = spaceship_force.y_dir;
+    for (i in planets) {
+        var p = planets[i];
+        var this_force = p.get_gforce(spaceship.x, spaceship.y, spaceship.mass);
+        ////console.log("Adding force from Planet " + i);
+        ////console.log("x_dir : " + this_force.x_dir);
+        ////console.log("y_dir : " + this_force.y_dir);
+        x_dir += this_force.x_dir;
+        y_dir += this_force.y_dir;
+    }
+
+    return new ResolvedVector(x_dir, y_dir);
+}
+
+function updatePlanets() {
+    ctx = gameArea.context;
+    var img = new Image();
+    var planet_radius = 178;
+    img.src = "planet.png";
+    for (i in planets) {
+        var p = planets[i];
+        var ratio = p.radius / planet_radius;
+        
+        ctx.save();
+        ctx.scale(ratio, ratio);
+        ctx.drawImage(img, (p.x - p.radius) /ratio, (p.y - p.radius) / ratio);
+        ctx.restore();
+    }
+}
+
+function updateBackground() {
+    ctx = gameArea.context;
+    var img = new Image();
+    img.src = "space.png";
+    ctx.drawImage(img, 0, 0);
+}
+
+function checkGameOver() {
+    return (checkCollisions() || checkBoundaries());   
+}
+
+function checkCollisions() {
+    for (i in planets) {
+        var p = planets[i];
+        if (p.collide(spaceship.x, spaceship.y, spaceship.radius)) {
+            return true;
+        } 
+    }
+    return false;
+}
+
+function checkBoundaries() {
+    return (spaceship.x < -spaceship.radius * 1.5 || spaceship.x > canvas_width + spaceship.radius * 1.5 ||
+    spaceship.y < -spaceship.radius * 1.5 || spaceship.y > canvas_height + spaceship.radius * 1.5);
+}
+
+
+function displayGamePlay() {
+    gameArea.clear();
+    updateBackground();
+    updatePlanets();
+    updateSpaceship();
+    updateScore();
+}
+
+function displayGameover() {
+    gameArea.clear();
+    crash.play();
+    updateBackground();
+    updatePlanets();
+    updateSpaceship();
+
+
+    ctx = gameArea.context;
+    var img = new Image();
+    img.onload = function() {
+        ctx.drawImage(img, 100, 250);
+        ctx.font = "80px Consolas";
+        ctx.textAlign = 'center';
+        ctx.fillStyle = "white";
+        ctx.fillText("Final Score : " + score, canvas_width/2, canvas_height/2 + 100);
+    }
+    img.src = "gameover.png";
+    
+    //ctx.fillText("Game Over!", canvas_width/2, canvas_height/2 - 65);
+    
+}
+
+function getChar(event) {
+    if (event.which == null) {
+        return String.fromCharCode(event.keyCode) // IE
+    }
+    else if (event.which!=0 && event.charCode!=0) {
+        return String.fromCharCode(event.which)   // the rest
+    }
+    else {
+        return null // special key
+    }
+}
+
+
+function setButtonArea(buttonHtml) {
+    document.getElementById("button-area").innerHTML = buttonHtml;
+}
+
+</script>
+<br>
+<div id="button-area"></div>    
+</body>
+</html>
